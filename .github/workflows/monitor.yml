@@ -1,42 +1,35 @@
 name: Daily SHRAP Tag Monitor
 
 on:
-  # ── 定时触发 ──
   schedule:
-    # 北京时间 09:00  ⇒  UTC 01:00
+    # 北京 09:00
     - cron: '0 1 * * *'
-    # 北京时间 21:00  ⇒  UTC 13:00
+    # 北京 21:00
     - cron: '0 13 * * *'
-  # ── 手动触发按钮 ──
   workflow_dispatch:
 
 jobs:
-  run-monitor:
+  monitor:
     runs-on: ubuntu-latest
 
     env:
-      # 这些值在仓库 Settings ▸ Secrets and variables ▸ Actions 中配置
       TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
       TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+      # 若你有代理，可在仓库 Secrets 里加 HTTP_PROXY，再取消注释：
+      # http_proxy:  ${{ secrets.HTTP_PROXY }}
+      # https_proxy: ${{ secrets.HTTP_PROXY }}
 
     steps:
-      # 1) 拉取代码
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 2) 安装 Python 3.11
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3) 安装依赖
-      - name: Install dependencies
+      - name: Install dependencies (lock versions)
         run: |
-          pip install "undetected-chromedriver>=3.5" selenium requests
-          # webdriver‑manager 不再需要
+          pip install "undetected-chromedriver>=3.5.4" selenium==4.19.0 requests
 
-      # 4) 运行脚本，并强制推送一次结果
       - name: Run monitor script
         run: |
-          python check_shrap_github.py --force-alert
+          python check_shrap_tags.py --force-alert
