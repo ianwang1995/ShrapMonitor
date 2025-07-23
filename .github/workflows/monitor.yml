@@ -33,7 +33,7 @@ jobs:
       # 3) 安装依赖
       - name: Install dependencies
         run: |
-          pip install selenium webdriver-manager requests
+          pip install "selenium>=4.19.0" webdriver-manager requests
 
       # 4) 运行脚本，并强制推送一次结果
       - name: Run monitor script
