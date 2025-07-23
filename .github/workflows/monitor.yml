@@ -38,4 +38,4 @@ jobs:
       # 4) 运行脚本，并强制推送一次结果
       - name: Run monitor script
         run: |
-          python check_shrap_tags.py --force-alert
+          python check_shrap_github.py --force-alert
