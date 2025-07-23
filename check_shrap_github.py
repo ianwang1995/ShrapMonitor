@@ -1,30 +1,39 @@
 # ─── check_shrap_tags.py ───
 """
-每天检测 SHRAP 代币是否被标注 ST / Innovation Zone。
-● BingX / HTX / Bybit 三个平台
-● 发现标签才推送 Telegram
-● --test        只发一条“Telegram 手动测试成功”
-● --force-alert 无论有没有标签都推送一次检测结果
+SHRAP Tag Monitor
+-----------------
+• 检测 BingX / HTX / Bybit 是否出现 “ST” 或 “Innovation Zone” 英文标签
+• 显式等待元素，避免 GitHub Runner 抓到降级 / 未渲染页面
+• 默认仅当发现标签时推送；--force-alert 可强制推送
+• 用法示例：
+      python check_shrap_tags.py                  # 常规检测
+      python check_shrap_tags.py --force-alert    # 总推送
+      python check_shrap_tags.py --test           # 仅发测试消息
 """
 
 import os
+import re
 import time
-from datetime import datetime
 import argparse
+from datetime import datetime
+
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# ===== 环境变量 =====
-BOT_TOKEN = os.getenv("TG_BOT_TOKEN")   # GitHub Secrets / 本地终端导出
-CHAT_ID   = os.getenv("TG_CHAT_ID")     # 私聊或群/频道 chat_id
-# ====================
+# ── 环境变量：从 GitHub Secrets / 本地 shell 读取 ──
+BOT_TOKEN = os.getenv("TG_BOT_TOKEN")   # Telegram Bot Token
+CHAT_ID   = os.getenv("TG_CHAT_ID")     # 私聊(正) / 群(负) chat_id
 
-HEADLESS = True        # 调试可改 False
-WAIT_SEC = 5           # 页面加载等待秒数
-LOG_FILE = "shrap_tag_report.txt"
+# ── 全局配置 ──
+HEADLESS  = True      # False 可打开浏览器窗口调试
+WAIT_SEC  = 15        # 最长等待渲染秒数
+LOG_FILE  = "shrap_tag_report.txt"
 
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
@@ -32,7 +41,7 @@ SITES = [
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
-# ---------- Selenium 驱动 ----------
+# ────────────────────────────────────────────────
 def get_driver():
     opts = Options()
     if HEADLESS:
@@ -44,47 +53,53 @@ def get_driver():
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=opts)
 
-# ---------- 单站检测 ----------
 def detect(url: str, name: str):
-    """返回 (平台名, 标签列表)；若抓取失败返回 fetch_error"""
+    """返回 (平台名, 标签列表|fetch_error)"""
     try:
         d = get_driver()
         d.get(url)
-        time.sleep(WAIT_SEC)
+
+        # 等待到页面文本出现目标关键词
+        WebDriverWait(d, WAIT_SEC).until(
+            EC.presence_of_element_located(
+                (By.XPATH,
+                 "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'innovation zone') or "
+                 "contains(text(),'ST')]")
+            )
+        )
         page = d.page_source.lower()
         d.quit()
     except Exception as e:
         return name, [f"fetch_error:{e}"]
 
+    # 调试输出：抓到的源码长度
+    print(f"{name} page length: {len(page)}")
+
     tags = []
-    if " st " in page:                         # 避免 best/first 等误判
+    if re.search(r'\bst\b', page):              # \b 单词边界，精确匹配 “ST”
         tags.append("ST")
-    if "innovation zone" in page or "创新区" in page:
+    if "innovation zone" in page:
         tags.append("Innovation Zone")
     return name, tags
 
-# ---------- Telegram 推送 ----------
 def push_tg(msg: str):
     if not BOT_TOKEN or not CHAT_ID:
-        print("⚠️  BOT_TOKEN / CHAT_ID 未设置，无法推送。")
+        print("⚠️  BOT_TOKEN 或 CHAT_ID 未设置，跳过推送。")
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
     except Exception as e:
         print(f"❌ Telegram 推送失败: {e}")
 
-# ---------- 主逻辑 ----------
 def main(test_mode=False, force_alert=False):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    # 手动测试
     if test_mode:
         push_tg(f"[{now}] ✅ Telegram 手动测试成功")
         print("已发送测试消息到 Telegram")
         return
 
-    # 正常检测
     results = [detect(u, n) for n, u in SITES]
 
     lines, alert_needed = [], False
@@ -96,19 +111,17 @@ def main(test_mode=False, force_alert=False):
         else:
             lines.append(f"{name}: ✅ No tag")
 
-    report  = " | ".join(lines)
+    report   = " | ".join(lines)
     log_line = f"[{now}] {report}"
 
-    # 写日志
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(log_line + "\n")
     print(log_line)
 
-    # 推送
     if alert_needed or force_alert:
         push_tg(log_line)
 
-# ---------- CLI ----------
+# ── CLI ──
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SHRAP tag monitor")
     parser.add_argument("--test", action="store_true",
@@ -118,4 +131,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(test_mode=args.test, force_alert=args.force_alert)
-# ───────────────────────────
+# ────────────────────────────────────────────────
