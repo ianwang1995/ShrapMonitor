@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies (lock versions)
         run: |
-          pip install undetected-chromedriver selenium selenium-wire requests webdriver-manager blinker
+          pip install undetected-chromedriver selenium selenium-wire requests webdriver-manager "blinker<1.5"
 
       - name: Run monitor script
         run: |
