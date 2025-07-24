@@ -1,9 +1,8 @@
 # ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor • 混合 requests + Playwright 版 (2025-07-24)
-· Bybit 用 Playwright 渲染（资源屏蔽、DOMContentLoaded）
-· HTX 走 huobi.br.com/es-la 静态页
-· BingX 走普通 requests + 代理
+SHRAP Tag Monitor • 混合 requests + Playwright 版 (优化 Bybit 不走代理)
+· BingX/HTX 用 requests+Oxylabs 代理
+· Bybit 用 Playwright 直连（无代理），屏蔽静态资源，只等 DOMContentLoaded
 """
 
 import re, argparse, warnings
@@ -15,7 +14,7 @@ from playwright.sync_api import sync_playwright
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
 CHAT_ID   = "1805436662"
 
-# ─── 代理（仅给 requests） ───
+# ─── Oxylabs Web-Unblocker 代理（只给 requests 用） ───
 PROXY = "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000"
 PROXIES = {"http": PROXY, "https": PROXY}
 
@@ -29,33 +28,37 @@ SITES = [
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 
 def fetch_bybit_html(url: str) -> str:
-    """Playwright 渲染 Bybit，屏蔽静态资源，只等 DOMContentLoaded"""
+    """Playwright 直连 Bybit，屏蔽静态资源，只等 DOMContentLoaded"""
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
             headless=True,
-            args=["--no-sandbox"],
-            proxy={"server": PROXY}
+            args=["--no-sandbox"]
+            # 不再使用 Oxylabs 代理，切换成直连
         )
         ctx = browser.new_context(user_agent=USER_AGENT)
         page = ctx.new_page()
-        # 屏蔽图片、样式、字体、媒体
-        page.route("**/*", lambda route, req: route.abort() 
-                   if req.resource_type in ("image", "stylesheet", "font", "media") 
+
+        # 屏蔽图片/样式/字体/媒体，加速加载
+        page.route("**/*", lambda route, req: route.abort()
+                   if req.resource_type in ("image", "stylesheet", "font", "media")
                    else route.continue_())
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        # 给少量时间让标签注入
+
+        # 只等 DOMContentLoaded，超时设长点
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        # 给前端脚本一点时间插入标签
         page.wait_for_timeout(1000)
+
         html = page.content()
         browser.close()
         return html.lower()
 
 def detect(name: str, url: str):
-    """返回 (name, [tags...])"""
+    """返回 (name, [tags...])，tags 包括 Innovation Zone / ST"""
     try:
         if name == "Bybit":
             text = fetch_bybit_html(url)
         else:
-            # HTX & BingX 全用 requests
+            # BingX + HTX 静态页面走 requests
             r = requests.get(url, headers={"User-Agent": USER_AGENT},
                              proxies=PROXIES, verify=False, timeout=20)
             text = r.text.lower()
@@ -73,6 +76,7 @@ def detect(name: str, url: str):
     return name, tags
 
 def push_tg(msg: str):
+    """发送 Telegram"""
     try:
         requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
