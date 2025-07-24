@@ -1,12 +1,12 @@
 # ----- check_shrap_tags.py -----
 """
 SHRAP Tag Monitor • requests 轻量版 (2025-07-24)
-· 仅对 HTX 强制英文 Accept-Language、直连；BingX/Bybit 继续走 Oxylabs 代理
-· 仅用 requests 获取页面 → 正则判 “Innovation Zone” / “ST”
+· Oxylabs 代理继续给 BingX/Bybit
+· HTX 换成 /en-us/ 路径直连，拿英文页面
+· 只用 requests + 正则判 “Innovation Zone” / “ST”
 """
 
-import re
-import argparse
+import re, argparse
 from datetime import datetime
 import requests
 
@@ -14,49 +14,44 @@ import requests
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
 CHAT_ID   = "1805436662"
 
-# ─── Oxylabs Web-Unblocker 代理（仅给 BingX/Bybit） ───
-PROXY = "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000"
-PROXIES = {"http": PROXY, "https": PROXY}
+# ─── Oxylabs Web-Unblocker 代理（BingX/Bybit 用） ───
+PROXIES = {
+    "http":  "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000",
+    "https": "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000",
+}
 
-# ─── 默认 User-Agent ───
-BASE_HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ─── 监控站点列表 ───
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
-    ("HTX",   "https://www.htx.com/trade/shrap_usdt?type=spot"),
+    # 这里改成 /en-us/ 路径，让 HTX 返回英文版
+    ("HTX",   "https://www.htx.com/en-us/trade/shrap_usdt?type=spot"),
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
-def detect(url: str, name: str):
-    # 准备 headers 和 proxies
-    headers = BASE_HEADERS.copy()
-    if name == "HTX":
-        # 强制英文，不走代理
-        headers["Accept-Language"] = "en-US,en;q=0.9"
-        proxies = None
-    else:
-        # BingX/Bybit 走 Oxylabs 代理
-        proxies = PROXIES
+def detect(name: str, url: str):
+    # BingX/Bybit 走代理，HTX 直连
+    proxies = None if name == "HTX" else PROXIES
 
-    # 发请求
     try:
-        r = requests.get(url,
-                         headers=headers,
-                         proxies=proxies,
-                         verify=False,
-                         timeout=25)
+        r = requests.get(
+            url,
+            headers=HEADERS,
+            proxies=proxies,
+            verify=False,
+            timeout=25
+        )
         text = r.text.lower()
     except Exception as e:
-        return name, [f"fetch_error:{e.__class__.__name__}"]
+        return name, [f"fetch_error:{type(e).__name__}"]
 
-    # 匹配标签
     tags = []
-    # English or Chinese for Innovation Zone
+    # 英文 innovation zone 或中文 创新专区
     if "innovation zone" in text or "创新专区" in text:
         tags.append("Innovation Zone")
 
-    # ST 标签：找 “st” 并在附近匹配风险关键字
+    # ST 附近匹配 risk/special/treatment
     for m in re.finditer(r'\bst\b', text):
         window = text[max(0, m.start()-15): m.end()+15]
         if re.search(r'risk|special|treatment', window):
@@ -72,23 +67,21 @@ def push_tg(msg: str):
             data={"chat_id": CHAT_ID, "text": msg},
             timeout=10
         )
-    except Exception:
+    except:
         pass
 
 def main(test=False):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     if test:
         push_tg(f"[{now}] ✅ Telegram 测试成功")
         print("测试消息已发")
         return
 
-    results = [detect(u, n) for n, u in SITES]
+    results = [detect(n, u) for n, u in SITES]
     alert = any(tags and not tags[0].startswith("fetch_error") for _, tags in results)
-
     line = " | ".join(
-        f"{name}: {'❗️'+', '.join(tags) if tags else '✅ No tag'}"
-        for name, tags in results
+        f"{n}: {'❗️'+', '.join(tags) if tags else '✅ No tag'}"
+        for n, tags in results
     )
     log = f"[{now}] {line}"
     print(log)
