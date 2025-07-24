@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies (lock versions)
         run: |
-          pip install "undetected-chromedriver>=3.5.4" selenium==4.19.0 requests
+          pip install undetected-chromedriver selenium requests webdriver-manager
 
       - name: Run monitor script
         run: |
