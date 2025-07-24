@@ -1,21 +1,21 @@
 # ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor • Hybrid 最终版
-· HTX：Playwright 渲染 + 等待 “Innovation Zone” 超链接
-· BingX/Bybit：requests + Oxylabs 代理 + 宽松匹配
+SHRAP Tag Monitor • Anchor 文本检测版
+· HTX：Playwright 渲染 → 抽取所有 <a> 文本 → 查关键词
+· BingX/Bybit：requests + Oxylabs 代理 + 原始宽松匹配
 """
 
 import re
 import argparse
 from datetime import datetime
 import requests
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright
 
 # ─── Telegram 配置 ───
-BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
+BOT_TOKEN = "7725811450:AAF9BQZEsBEfbq9sdfkjhCVTrcc"
 CHAT_ID   = "1805436662"
 
-# ─── 代理（BingX/Bybit） ───
+# ─── 代理（BingX/Bybit 用） ───
 PROXIES = {
     "http":  "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000",
     "https": "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000",
@@ -29,11 +29,8 @@ SITES = [
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
-def fetch_htx_with_js(url: str) -> str:
-    """
-    用 Playwright 打开 HTX，强制英文环境，
-    等待那个 “Innovation Zone” 可点击链接出现，然后返回渲染后的 HTML（小写）
-    """
+def fetch_htx_anchor_texts(url: str):
+    """Playwright 渲染 HTX，返回所有 <a> 的 innerText 列表（小写）"""
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
         ctx = browser.new_context(
@@ -42,48 +39,52 @@ def fetch_htx_with_js(url: str) -> str:
             extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
         )
         page = ctx.new_page()
-        # 屏蔽图片/样式/字体/媒体，加速加载
+        # 屏蔽图片/样式/字体/媒体
         page.route("**/*", lambda route, req: route.abort()
                    if req.resource_type in ("image","stylesheet","font","media")
                    else route.continue_())
         page.goto(url, wait_until="networkidle", timeout=60000)
-        try:
-            # 等待那个可点击的“Innovation Zone”链接节点出现
-            page.wait_for_selector('a:has-text("Innovation Zone")', timeout=15000)
-        except PlaywrightTimeout:
-            pass
-        html = page.content().lower()
+        page.wait_for_timeout(2000)
+        # 抽取所有<a>文字
+        texts = page.evaluate(
+            "() => Array.from(document.querySelectorAll('a'))"
+            ".map(a => a.innerText.trim().toLowerCase())"
+        )
         browser.close()
-        return html
+        return texts
 
 def detect(name: str, url: str):
-    """
-    – HTX：Playwright 渲染 + 等待“Innovation Zone”链接
-    – BingX/Bybit：requests + Oxylabs 代理 + 原始宽松匹配
-    """
     tags = []
+
     if name == "HTX":
         try:
-            text = fetch_htx_with_js(url)
+            anchors = fetch_htx_anchor_texts(url)
         except Exception as e:
             return name, [f"fetch_error:{type(e).__name__}"]
-        if "innovation zone" in text:
-            tags.append("Innovation Zone")
+        # 在所有链接文字里找关键词
+        for t in anchors:
+            if "innovation zone" in t or "asset risk disclosure" in t:
+                tags.append("Innovation Zone")
+                break
+
     else:
         try:
-            resp = requests.get(url, headers=HEADERS,
-                                proxies=PROXIES, verify=False, timeout=25)
+            resp = requests.get(
+                url,
+                headers=HEADERS,
+                proxies=PROXIES,
+                verify=False,
+                timeout=25
+            )
             text = resp.text.lower()
         except Exception as e:
             return name, [f"fetch_error:{type(e).__name__}"]
+        # 原始宽松匹配
         if "innovation" in text and ("zone" in text or "risk" in text):
             tags.append("Innovation Zone")
 
-    # ST 标签检测（所有站点通用）
-    try:
-        source = text
-    except UnboundLocalError:
-        source = ""
+    # ST 检测（通用）
+    source = text if name != "HTX" else " ".join(anchors)
     for m in re.finditer(r'\bst\b', source):
         snippet = source[max(0, m.start()-15): m.end()+15]
         if re.search(r'risk|special|treatment', snippet):
