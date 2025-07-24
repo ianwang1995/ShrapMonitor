@@ -1,22 +1,27 @@
 # ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor • 动态抓 HTX hotWordList 接口 + 原始 BingX/Bybit 逻辑
-· 第一步 GET HTX 页面，正则找出 hotWordList 接口路径
-· 第二步 GET 该接口，解析 JSON 看 banner 文本
-· BingX/Bybit：requests + Oxylabs 代理 + 宽松匹配
+SHRAP Tag Monitor • HTX API 多端点探测 + 回退 HTML 正则
+· HTX：尝试 /hotWordList 和 /trade/hotWordList，拿 JSON 里 banner 文本
+        — 如都失败，再从 HTML 正则查 “innovation zone” / “创新专区”
+· BingX/Bybit：requests + Oxylabs 代理 + 原始宽松匹配
 """
 
-import re, time, urllib.parse, argparse
+import re
+import time
+import argparse
 from datetime import datetime
 import requests
 
+# ─── Telegram 配置 ───
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbq9sdfkjhCVTrcc"
 CHAT_ID   = "1805436662"
 
+# ─── Oxylabs 代理（仅给 BingX/Bybit） ───
 PROXIES = {
     "http":  "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000",
     "https": "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000",
 }
+
 HEADERS = {
     "User-Agent":      "Mozilla/5.0",
     "Accept-Language": "en-US,en;q=0.9"
@@ -29,62 +34,74 @@ SITES = [
 ]
 
 def detect_htx(url: str):
-    tags = []
+    """
+    多端点探测 HTX hotWordList 接口拿 banner 文本 
+    回退到 HTML 正则
+    """
     session = requests.Session()
-    # 1. 拉取页面 HTML
-    resp = session.get(url, headers=HEADERS, timeout=20, verify=False)
-    html = resp.text
-
-    # 2. 动态正则提取 hotWordList 接口路径
-    #    匹配形如 "/hotWordList?r=162xxx..." 或 "/trade/hotWordList?..." 的片段
-    m = re.search(r'(["\'])(/[^"\']*hotWordList\?r=\d+[^"\']*)\1', html)
-    if not m:
-        return tags  # 找不到接口，回空
-
-    api_path = m.group(2)
-    api_url  = urllib.parse.urljoin(url, api_path)
-    # 3. 调用接口拿 JSON
-    jresp = session.get(api_url, headers=HEADERS, timeout=10, verify=False)
+    session.headers.update(HEADERS)
+    # 预先 GET 主页面设置 Cookie
     try:
-        data = jresp.json().get("data", [])
-    except ValueError:
-        return tags
-
-    # 4. 在返回的 data 列表里找 banner 文本
-    for item in data:
-        text = item.get("text", "").lower()
-        if "innovation zone asset risk disclosure" in text:
-            tags.append("Innovation Zone")
-            break
-
-    return tags
+        resp_page = session.get(url, timeout=20, verify=False)
+        html = resp_page.text
+    except Exception:
+        html = ""
+    # 可能的 API 路径
+    endpoints = [
+        "https://www.htx.com/hotWordList",
+        "https://www.htx.com/trade/hotWordList",
+    ]
+    # 第一优先：接口 JSON
+    for api in endpoints:
+        try:
+            r = session.get(
+                api,
+                params={"r": str(int(time.time()*1000))},
+                timeout=10,
+                verify=False
+            )
+            if r.status_code != 200:
+                continue
+            data = r.json().get("data", [])
+        except Exception:
+            continue
+        # 搜 banner 文本
+        for item in data:
+            text = item.get("text", "").lower()
+            if "innovation zone" in text or "创新专区" in text:
+                return ["Innovation Zone"]
+    # 第二优先：HTML 正则
+    lower = html.lower()
+    if "innovation zone" in lower or "创新专区" in lower:
+        return ["Innovation Zone"]
+    return []
 
 def detect(name: str, url: str):
+    tags = []
     if name == "HTX":
-        try:
-            tags = detect_htx(url)
-        except Exception as e:
-            return name, [f"fetch_error:{type(e).__name__}"]
+        tags = detect_htx(url)
     else:
-        # BingX/Bybit：原始轻量逻辑
+        # BingX/Bybit：原始轻量匹配
         try:
-            r = requests.get(url, headers=HEADERS,
-                             proxies=PROXIES, verify=False, timeout=20)
+            r = requests.get(
+                url,
+                headers=HEADERS,
+                proxies=PROXIES,
+                verify=False,
+                timeout=20
+            )
             text = r.text.lower()
-            tags = []
             if "innovation" in text and ("zone" in text or "risk" in text):
                 tags.append("Innovation Zone")
         except Exception as e:
             return name, [f"fetch_error:{type(e).__name__}"]
-
-    # ST 检测（所有站点通用）
-    source = text if name != "HTX" else ""  # HTX banner 接口里没有 ST，所以跳过
+    # ST 通用检测
+    source = text if name != "HTX" else ""  # HTX 上没 ST
     for m in re.finditer(r'\bst\b', source):
-        w = source[max(0, m.start()-15): m.end()+15]
-        if re.search(r'risk|special|treatment', w):
+        window = source[max(0, m.start()-15): m.end()+15]
+        if re.search(r'risk|special|treatment', window):
             tags.append("ST")
             break
-
     return name, tags
 
 def push_tg(msg: str):
@@ -109,11 +126,12 @@ def main(test=False):
         f"{n}: {'❗️'+','.join(tags) if tags else '✅ No tag'}"
         for n, tags in results
     )
-    print(f"[{now}] {line}")
+    log = f"[{now}] {line}"
+    print(log)
     with open("shrap_tag_report.txt", "a", encoding="utf-8") as f:
-        f.write(f"[{now}] {line}\n")
+        f.write(log + "\n")
     if any(tags for _, tags in results):
-        push_tg(f"[{now}] {line}")
+        push_tg(log)
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
