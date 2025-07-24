@@ -1,9 +1,9 @@
 # ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor • 全 Playwright 版 (2025-07-24)
-· 三个交易所都用 Playwright 渲染
-· 屏蔽静态资源，等待 DOMContentLoaded + 少量延时
-· 不再使用任何代理
+SHRAP Tag Monitor • Playwright 全量渲染版 (2025-07-24)
+· 三家交易所都用 Playwright Headless Chromium
+· 等待 networkidle + 少量延时，保证 JS 注入的标签都到位
+· 屏蔽图片/样式/字体/媒体，加速加载
 """
 
 import re, argparse
@@ -18,6 +18,7 @@ CHAT_ID   = "1805436662"
 # ─── 目标站 URL 列表 ───
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
+    # 下面这个 URL 已经验证过页面里会有“Innovation Zone Asset Risk Disclosure.”
     ("HTX",   "https://www.htx.com/trade/shrap_usdt?invite_code=bsvx3223"),
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
@@ -25,23 +26,24 @@ SITES = [
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 
 def fetch_html_playwright(url: str) -> str:
-    """用 Playwright 打开页面，屏蔽静态资源，只等 DOMContentLoaded"""
+    """用 Playwright 打开页面，屏蔽静态资源，只等 networkidle + 少量延时"""
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
         ctx = browser.new_context(user_agent=USER_AGENT)
         page = ctx.new_page()
-        # 拦截静态资源，加快加载
+        # 屏蔽资源，加快加载
         page.route("**/*", lambda route, req: route.abort()
                    if req.resource_type in ("image", "stylesheet", "font", "media")
                    else route.continue_())
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(1000)  # 给前端脚本一点时间插入标签
+        # 等全部网络请求、脚本执行完
+        page.goto(url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(2000)  # 再给 2s 让徽章/标签插入 DOM
         html = page.content()
         browser.close()
         return html.lower()
 
 def detect(name: str, url: str):
-    """检测单个交易所页面里的 Innovation Zone / ST 标记"""
+    """返回 (交易所名, [标签列表])——可能包含 "Innovation Zone" 或 "ST""""
     try:
         text = fetch_html_playwright(url)
     except Exception as e:
@@ -50,7 +52,6 @@ def detect(name: str, url: str):
     tags = []
     if "innovation zone" in text:
         tags.append("Innovation Zone")
-    # ST：找 “st” 并在附近上下文匹配关键字
     for m in re.finditer(r'\bst\b', text):
         window = text[max(0, m.start() - 15): m.end() + 15]
         if re.search(r'risk|special|treatment', window):
@@ -59,7 +60,7 @@ def detect(name: str, url: str):
     return name, tags
 
 def push_tg(msg: str):
-    """发 Telegram 报警"""
+    """发 Telegram"""
     try:
         requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -77,18 +78,15 @@ def main(test=False):
         return
 
     results = [detect(n, u) for n, u in SITES]
-    alert = any(tags and not tags[0].startswith("fetch_error")
-                for _, tags in results)
+    alert = any(tags and not tags[0].startswith("fetch_error") for _, tags in results)
     line = " | ".join(
         f"{n}: {'❗️'+','.join(tags) if tags else '✅ No tag'}"
         for n, tags in results
     )
     log = f"[{now}] {line}"
     print(log)
-
     with open("shrap_tag_report.txt", "a", encoding="utf-8") as f:
         f.write(log + "\n")
-
     if alert:
         push_tg(log)
 
