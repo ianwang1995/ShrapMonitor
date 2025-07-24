@@ -11,7 +11,8 @@ CHAT_ID   = "1805436662"
 # Oxylabs credentials
 API_USER = "ianwang_w8WVr"
 API_PASS = "Snowdor961206~"
-BASE     = "https://pr.oxylabs.io:8443"
+BASE = "https://104.17.8.22"          # ← 纯 IP
+HOST_HEADER = {"Host": "pr.oxylabs.io"}
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
 TIMEOUT = 90  # 单站最多等待 90 秒
@@ -25,15 +26,17 @@ SITES = [
 def fetch_html(url: str) -> str:
     payload = {
         "url": url,
-        "render": True,     # 执行 JS
-        "country": "us",    # 可改成 hk / jp
+        "render": True,
+        "country": "us"
     }
-    r = requests.post(BASE,
-                      headers=HEADERS,
-                      auth=HTTPBasicAuth(API_USER, API_PASS),
-                      data=json.dumps(payload),
-                      verify=False,
-                      timeout=TIMEOUT)
+    r = requests.post(
+        BASE,
+        headers={**HEADERS, **HOST_HEADER, "Content-Type": "application/json"},
+        auth=(API_USER, API_PASS),
+        data=json.dumps(payload),
+        verify=False,
+        timeout=90
+    )
     r.raise_for_status()
     return r.text.lower()
 
