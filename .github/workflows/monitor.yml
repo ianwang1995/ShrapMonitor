@@ -32,4 +32,4 @@ jobs:
 
       - name: Run monitor script
         run: |
-          python check_shrap_tags.py --force-alert
+          python check_shrap_tags.py
