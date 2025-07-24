@@ -1,7 +1,7 @@
 # ----- check_shrap_tags.py -----
 """
 SHRAP Tag Monitor • requests 轻量版 (2025-07-24)
-· Oxylabs Web-Unblocker 代理直连，绕过 Cloudflare
+· Oxylabs Web-Unblocker 代理直连，绕过 Cloudflare（仅用于 BingX/Bybit）
 · 仅用 requests 获取页面 → 正则判 “Innovation Zone” / “ST”
 """
 
@@ -20,7 +20,7 @@ PROXIES = {"http": PROXY, "https": PROXY}
 # ─── 目标站 ───
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
-    ("HTX",   "https://www.htx.com/trade/shrap_usdt?type=spot"),
+    ("HTX",   "https://www.htx.com/trade/shrap_usdt"),          # 已移除 ?type=spot
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
@@ -28,27 +28,37 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 def detect(url: str, name: str):
     try:
-        r = requests.get(url, headers=HEADERS,
-                         proxies=PROXIES, verify=False, timeout=25)
+        # HTX 走直连，不走代理
+        if name == "HTX":
+            r = requests.get(url, headers=HEADERS, verify=False, timeout=25)
+        else:
+            r = requests.get(url, headers=HEADERS,
+                             proxies=PROXIES, verify=False, timeout=25)
         text = r.text.lower()
     except Exception as e:
         return name, [f"fetch_error:{e.__class__.__name__}"]
 
     tags = []
-    if "innovation" in text and ("zone" in text or "risk" in text):
+    # 直接查短语
+    if "innovation zone" in text:
         tags.append("Innovation Zone")
 
+    # ST 检测逻辑保持不变
     for m in re.finditer(r'\bst\b', text):
-        window = text[max(0, m.start()-15): m.end()+15]
+        window = text[max(0, m.start() - 15) : m.end() + 15]
         if re.search(r'risk|special|treatment', window):
             tags.append("ST")
             break
+
     return name, tags
 
 def push_tg(msg: str):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                      data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg},
+            timeout=15
+        )
     except Exception as e:
         print("Telegram 推送失败:", e)
 
@@ -61,14 +71,17 @@ def main(test=False):
         return
 
     results = [detect(u, n) for n, u in SITES]
-    alert = any(t and not t[0].startswith("fetch_error") for _, t in results)
+    # 只要有任何非空 tag，就算 alert
+    alert = any(tags and not tags[0].startswith("fetch_error") for _, tags in results)
+
     line = " | ".join(
-        f"{n}: {'❗️'+', '.join(t) if t else '✅ No tag'}"
-        for n, t in results
+        f"{name}: {'❗️'+', '.join(tags) if tags else '✅ No tag'}"
+        for name, tags in results
     )
     log = f"[{now}] {line}"
     print(log)
 
+    # 追加到日志文件
     with open("shrap_tag_report.txt", "a", encoding="utf-8") as f:
         f.write(log + "\n")
 
@@ -77,6 +90,7 @@ def main(test=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--test", action="store_true")
+    ap.add_argument("--test", action="store_true",
+                    help="仅测试 Telegram 推送")
     args = ap.parse_args()
     main(test=args.test)
