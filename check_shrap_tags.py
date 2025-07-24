@@ -11,7 +11,7 @@ CHAT_ID   = "1805436662"
 # Oxylabs credentials
 API_USER = "ianwang_w8WVr"
 API_PASS = "Snowdor961206~"
-BASE     = "https://pr.oxylabs.io"
+BASE     = "https://pr.oxylabs.io:4444"
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
 TIMEOUT = 90  # 单站最多等待 90 秒
