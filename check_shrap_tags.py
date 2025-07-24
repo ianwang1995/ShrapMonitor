@@ -1,109 +1,80 @@
 # ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor  • 2025-07-24
-· Oxylabs Web-Unblocker 代理分离端点与凭据
-· 环境变量负责认证，Chrome 仅用 host:port，云端、本地一致
+SHRAP Tag Monitor • requests 轻量版 (2025-07-24)
+· Oxylabs Web-Unblocker 代理直连，绕过 Cloudflare
+· 仅用 requests 获取页面 → 正则判 “Innovation Zone” / “ST”
 """
 
-import os, re, time, argparse
+import re, argparse
 from datetime import datetime
 import requests
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
-# ============ Telegram ============
+# ─── Telegram 配置 ───
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
 CHAT_ID   = "1805436662"
 
-# ========= Proxy & Sites =========
-# Oxylabs Web-Unblocker
-PROXY_USER = "ianwang_w8WVr"
-PROXY_PASS = "Snowdor961206~"
-PROXY_HOST = "unblock.oxylabs.io:60000"      # 仅 host:port
-PROXY_FULL = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}"
+# ─── Oxylabs Web-Unblocker 代理 ───
+PROXY = "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000"
+PROXIES = {"http": PROXY, "https": PROXY}
 
-# 注入到环境变量，让 Chrome 自动带凭据
-os.environ["HTTP_PROXY"]  = PROXY_FULL
-os.environ["HTTPS_PROXY"] = PROXY_FULL
-
+# ─── 目标站 ───
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
     ("HTX",   "https://www.htx.com/trade/shrap_usdt?type=spot"),
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
-HEADLESS, WAIT = True, 25
-LOG_FILE = "shrap_tag_report.txt"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ---------- Selenium ----------
-def get_driver():
-    opt = Options()
-    if HEADLESS:
-        opt.add_argument("--headless=new")
-    opt.add_argument("--disable-gpu")
-    opt.add_argument("--no-sandbox")
-    opt.add_argument("--window-size=1920,1080")
-    opt.add_argument("user-agent=Mozilla/5.0")
-    # 只给 host:port，不带用户名密码
-    opt.add_argument(f"--proxy-server=http://{PROXY_HOST}")
-    opt.add_argument("--ignore-certificate-errors")
-    opt.add_argument("--ignore-ssl-errors")
-    return webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=opt
-    )
-
-# ---------- Detection ----------
-def detect(url, name):
+def detect(url: str, name: str):
     try:
-        d = get_driver()
-        d.get(url)
-        time.sleep(WAIT)
-        html = d.page_source
-        d.quit()
+        r = requests.get(url, headers=HEADERS,
+                         proxies=PROXIES, verify=False, timeout=25)
+        text = r.text.lower()
     except Exception as e:
         return name, [f"fetch_error:{e.__class__.__name__}"]
 
-    low, tags = html.lower(), []
-    if "innovation" in low and ("zone" in low or "risk" in low):
+    tags = []
+    if "innovation" in text and ("zone" in text or "risk" in text):
         tags.append("Innovation Zone")
-    for m in re.finditer(r'\bst\b', html, flags=re.I):
-        win = low[max(0, m.start()-15): m.end()+15]
-        if re.search(r'risk|special|treatment', win):
+
+    for m in re.finditer(r'\bst\b', text):
+        window = text[max(0, m.start()-15): m.end()+15]
+        if re.search(r'risk|special|treatment', window):
             tags.append("ST")
             break
     return name, tags
 
-# ---------- Telegram ----------
-def push(msg):
+def push_tg(msg: str):
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            timeout=15
-        )
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                      data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
     except Exception as e:
         print("Telegram 推送失败:", e)
 
-# ---------- Main ----------
 def main(test=False):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     if test:
-        push(f"[{now}] ✅ Telegram 手动测试成功")
-        print("测试消息已发"); return
+        push_tg(f"[{now}] ✅ Telegram 手动测试成功")
+        print("测试消息已发")
+        return
 
     results = [detect(u, n) for n, u in SITES]
     alert = any(t and not t[0].startswith("fetch_error") for _, t in results)
     line = " | ".join(
-        f"{n}: {'❗️'+', '.join(t) if t else '✅ No tag'}" for n, t in results
+        f"{n}: {'❗️'+', '.join(t) if t else '✅ No tag'}"
+        for n, t in results
     )
     log = f"[{now}] {line}"
-    print(log); open(LOG_FILE,"a",encoding="utf-8").write(log+"\n")
-    if alert: push(log)
+    print(log)
 
-# ---------- CLI ----------
+    with open("shrap_tag_report.txt", "a", encoding="utf-8") as f:
+        f.write(log + "\n")
+
+    if alert:
+        push_tg(log)
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--test", action="store_true")
