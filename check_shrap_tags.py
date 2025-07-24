@@ -33,17 +33,20 @@ SITES = [
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
-# ───────── 抓取函数 ─────────
 def fetch_html(url: str) -> str:
     api = f"{BASE}/?{PARAMS}&url={urllib.parse.quote_plus(url)}"
-    r = requests.get(api, headers=HEADERS, verify=False, timeout=40)
+    # 限时 90 秒，超过直接抛 Timeout
+    r = requests.get(api, headers=HEADERS, verify=False, timeout=90)
     r.raise_for_status()
     return r.text.lower()
 
-# ───────── 标签检测 ─────────
 def detect(name: str, url: str):
     try:
+        print(f"▼ fetching {name} …", flush=True)        # ← 打印开始
         html = fetch_html(url)
+        print(f"▲ done     {name}", flush=True)          # ← 打印结束
+    except requests.exceptions.Timeout:
+        return name, ["fetch_error:timeout"]
     except Exception as e:
         return name, [f"fetch_error:{e.__class__.__name__}"]
 
