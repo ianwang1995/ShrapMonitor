@@ -1,35 +1,96 @@
-name: Daily SHRAP Tag Monitor
+# ----- check_shrap_tags.py -----
+"""
+SHRAP Tag Monitor • requests 轻量版 (2025-07-24)
+· Oxylabs Web-Unblocker 代理直连，绕过 Cloudflare（仅用于 BingX/Bybit）
+· 仅用 requests 获取页面 → 正则判 “Innovation Zone” / “ST”
+"""
 
-on:
-  schedule:
-    # 北京 09:00
-    - cron: '0 1 * * *'
-    # 北京 21:00
-    - cron: '0 13 * * *'
-  workflow_dispatch:
+import re, argparse
+from datetime import datetime
+import requests
 
-jobs:
-  monitor:
-    runs-on: ubuntu-latest
+# ─── Telegram 配置 ───
+BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
+CHAT_ID   = "1805436662"
 
-    env:
-      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-      TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
-      # 若你有代理，可在仓库 Secrets 里加 HTTP_PROXY，再取消注释：
-      # http_proxy:  ${{ secrets.HTTP_PROXY }}
-      # https_proxy: ${{ secrets.HTTP_PROXY }}
+# ─── Oxylabs Web-Unblocker 代理 ───
+PROXY = "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000"
+PROXIES = {"http": PROXY, "https": PROXY}
 
-    steps:
-      - uses: actions/checkout@v4
+# ─── 目标站 ───
+SITES = [
+    ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
+    ("HTX",   "https://www.htx.com/trade/shrap_usdt"),          # 已移除 ?type=spot
+    ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
+]
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-      - name: Install dependencies (lock versions)
-        run: |
-          pip install undetected-chromedriver selenium selenium-wire requests webdriver-manager "blinker<1.5"
+def detect(url: str, name: str):
+    try:
+        # HTX 走直连，不走代理
+        if name == "HTX":
+            r = requests.get(url, headers=HEADERS, verify=False, timeout=25)
+        else:
+            r = requests.get(url, headers=HEADERS,
+                             proxies=PROXIES, verify=False, timeout=25)
+        text = r.text.lower()
+    except Exception as e:
+        return name, [f"fetch_error:{e.__class__.__name__}"]
 
-      - name: Run monitor script
-        run: |
-          python check_shrap_tags.py
+    tags = []
+    # 直接查短语
+    if "innovation zone" in text:
+        tags.append("Innovation Zone")
+
+    # ST 检测逻辑保持不变
+    for m in re.finditer(r'\bst\b', text):
+        window = text[max(0, m.start() - 15) : m.end() + 15]
+        if re.search(r'risk|special|treatment', window):
+            tags.append("ST")
+            break
+
+    return name, tags
+
+def push_tg(msg: str):
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg},
+            timeout=15
+        )
+    except Exception as e:
+        print("Telegram 推送失败:", e)
+
+def main(test=False):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if test:
+        push_tg(f"[{now}] ✅ Telegram 手动测试成功")
+        print("测试消息已发")
+        return
+
+    results = [detect(u, n) for n, u in SITES]
+    # 只要有任何非空 tag，就算 alert
+    alert = any(tags and not tags[0].startswith("fetch_error") for _, tags in results)
+
+    line = " | ".join(
+        f"{name}: {'❗️'+', '.join(tags) if tags else '✅ No tag'}"
+        for name, tags in results
+    )
+    log = f"[{now}] {line}"
+    print(log)
+
+    # 追加到日志文件
+    with open("shrap_tag_report.txt", "a", encoding="utf-8") as f:
+        f.write(log + "\n")
+
+    if alert:
+        push_tg(log)
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--test", action="store_true",
+                    help="仅测试 Telegram 推送")
+    args = ap.parse_args()
+    main(test=args.test)
