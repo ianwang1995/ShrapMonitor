@@ -32,6 +32,4 @@ jobs:
 
       - name: Run monitor script
         run: |
-          python check_shrap_github.py --force-alert
-
-      - run: curl -I https://bingx.com/en/spot/SHRAPUSDT
+          python check_shrap_tags.py --force-alert
