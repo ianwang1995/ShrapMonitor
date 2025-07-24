@@ -30,6 +30,11 @@ jobs:
         run: |
           pip install undetected-chromedriver selenium selenium-wire requests webdriver-manager "blinker<1.5"
 
+      - name: Network check
+        run: |
+          echo "Trying to reach pr.oxylabs.io:443 ..."
+          curl -Iv --connect-timeout 10 https://pr.oxylabs.io/_ping || echo "❌ 443 blocked"
+    
       - name: Run monitor script
         run: |
           python check_shrap_tags.py
