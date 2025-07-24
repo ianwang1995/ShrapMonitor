@@ -30,13 +30,6 @@ jobs:
         run: |
           pip install undetected-chromedriver selenium selenium-wire requests webdriver-manager "blinker<1.5"
 
-      - name: Network check to Anycast IP
-        run: |
-          echo "Checking reachability to Anycast IP…"
-          curl -Iv --connect-timeout 10 -k \
-            https://104.17.8.22/_ping \
-            -H "Host: pr.oxylabs.io" || echo "❌ Anycast IP blocked"
-
       - name: Run monitor script
         run: |
           python check_shrap_tags.py
