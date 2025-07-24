@@ -1,117 +1,82 @@
-# ----- check_shrap_tags.py  (Anycast IP + Host header + POST JSON) -----
+# ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor · 2025-07-24
-• Oxylabs Web-Unblocker API via Anycast IP + Host header
-• 全部用 requests，CI & 本地通用
+SHRAP Tag Monitor • requests 轻量版 (2025-07-24)
+· Oxylabs Web-Unblocker 代理直连，绕过 Cloudflare
+· 仅用 requests 获取页面 → 正则判 “Innovation Zone” / “ST”
 """
 
-import re, argparse, json
+import re, argparse
 from datetime import datetime
 import requests
-from requests.auth import HTTPBasicAuth
 
-# ───── Telegram ─────
+# ─── Telegram 配置 ───
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
 CHAT_ID   = "1805436662"
 
-# ───── Oxylabs Anycast IP & Credentials ─────
-API_USER = "ianwang_w8WVr"
-API_PASS = "Snowdor961206~"
-BASE_IP   = "https://104.17.8.22"   # Anycast IP (可替换)
-HOST_HDR  = {"Host": "pr.oxylabs.io"}
+# ─── Oxylabs Web-Unblocker 代理 ───
+PROXY = "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000"
+PROXIES = {"http": PROXY, "https": PROXY}
 
-# 请求头
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Content-Type": "application/json",
-    **HOST_HDR
-}
-TIMEOUT = 90  # 单站最⻓等待秒数
-
-# ───── 监控站点列表 ─────
+# ─── 目标站 ───
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
     ("HTX",   "https://www.htx.com/trade/shrap_usdt?type=spot"),
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
-# ───── 拉取最终渲染后的 HTML ─────
-def fetch_html(url: str) -> str:
-    payload = {
-        "url":     url,
-        "render":  True,     # 让后端执行 JS
-        "country": "us",     # 出口国家，可改为 hk/jp
-    }
-    resp = requests.post(
-        BASE_IP,
-        headers=HEADERS,
-        auth=HTTPBasicAuth(API_USER, API_PASS),
-        data=json.dumps(payload),
-        verify=False,       # 跳过证书
-        timeout=TIMEOUT
-    )
-    resp.raise_for_status()
-    return resp.text.lower()
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ───── 检测标签 ─────
-def detect(name: str, url: str):
+def detect(url: str, name: str):
     try:
-        print(f"▼ fetching {name} …", flush=True)
-        html = fetch_html(url)
-        print(f"▲ done     {name}", flush=True)
-    except requests.exceptions.Timeout:
-        return name, ["fetch_error:timeout"]
+        r = requests.get(url, headers=HEADERS,
+                         proxies=PROXIES, verify=False, timeout=25)
+        text = r.text.lower()
     except Exception as e:
         return name, [f"fetch_error:{e.__class__.__name__}"]
 
     tags = []
-    # Innovation Zone: 词距 ≤ 30 字符
-    if re.search(r'innovation.{0,30}zone|zone.{0,30}innovation', html):
+    if "innovation" in text and ("zone" in text or "risk" in text):
         tags.append("Innovation Zone")
-    # ST: 整词 ST 且附近出现 risk/special/treatment
-    for m in re.finditer(r'\bst\b', html):
-        window = html[max(0, m.start()-15): m.end()+15]
+
+    for m in re.finditer(r'\bst\b', text):
+        window = text[max(0, m.start()-15): m.end()+15]
         if re.search(r'risk|special|treatment', window):
             tags.append("ST")
             break
     return name, tags
 
-# ───── Telegram 推送 ─────
-def push(msg: str):
+def push_tg(msg: str):
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg},
-            proxies={},        # 不走代理
-            verify=False,
-            timeout=15
-        )
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                      data={"chat_id": CHAT_ID, "text": msg}, timeout=15)
     except Exception as e:
-        print("Telegram push fail:", e)
+        print("Telegram 推送失败:", e)
 
-# ───── 主流程 ─────
 def main(test=False):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if test:
-        push(f"[{now}] ✅ Telegram 手动测试成功")
-        print("测试消息已发"); return
 
-    results = [detect(n, u) for n, u in SITES]
-    alert   = any(t and not t[0].startswith("fetch_error") for _, t in results)
-    line    = " | ".join(
+    if test:
+        push_tg(f"[{now}] ✅ Telegram 手动测试成功")
+        print("测试消息已发")
+        return
+
+    results = [detect(u, n) for n, u in SITES]
+    alert = any(t and not t[0].startswith("fetch_error") for _, t in results)
+    line = " | ".join(
         f"{n}: {'❗️'+', '.join(t) if t else '✅ No tag'}"
         for n, t in results
     )
-    log_msg = f"[{now}] {line}"
-    print(log_msg)
+    log = f"[{now}] {line}"
+    print(log)
+
     with open("shrap_tag_report.txt", "a", encoding="utf-8") as f:
-        f.write(log_msg + "\n")
+        f.write(log + "\n")
+
     if alert:
-        push(log_msg)
+        push_tg(log)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--test", action="store_true",
-                    help="发送一条 Telegram 测试消息后退出")
+    ap.add_argument("--test", action="store_true")
     args = ap.parse_args()
     main(test=args.test)
