@@ -1,14 +1,15 @@
 # ----- check_shrap_tags.py -----
 """
-SHRAP Tag Monitor • requests-html 版 (2025-07-24)
-· 用 Requests-HTML 渲染前端 JS，抓取 “Innovation Zone” / “ST”
-· 仅对需要渲染的站点跑 .render()，其它继续走轻量 requests
+SHRAP Tag Monitor • 混合 requests + requests-html 版
+· BingX/Bybit 用 requests (Bybit 继续用代理)
+· HTX 用 huobi.br.com/es-la 域名静态页面（包含 Innovation Zone 文本）避免 JS 注入问题
 """
 
-import re, argparse, warnings
+import re, argparse
 from datetime import datetime
 import requests
 from requests_html import HTMLSession
+import warnings
 
 # ─── Telegram 配置 ───
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
@@ -18,42 +19,46 @@ CHAT_ID   = "1805436662"
 PROXY = "http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000"
 PROXIES = {"http": PROXY, "https": PROXY}
 
-# ─── 目标站（HTX/BingX 需要渲染 JS；Bybit 直接 requests 即可） ───
+# ─── 目标站（HTX 用 es-la 域名） ───
 SITES = [
     ("BingX", "https://bingx.com/en/spot/SHRAPUSDT"),
-    ("HTX",   "https://www.htx.com/trade/shrap_usdt"),      # Next.js 前端渲染
+    ("HTX",   "https://www.htx.com/trade/shrap_usdt?invite_code=shrap2025"),
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-# 全局 Requests-HTML 会话
+# requests-html session（只给 Bybit 渲染用）
 session = HTMLSession()
 
-def detect(url: str, name: str):
-    """返回 (exchange, [tags...])，tags 可能含 "Innovation Zone" / "ST""""
+def detect(name: str, url: str):
+    """
+    返回 (name, [tags...])，tags 包括 "Innovation Zone" / "ST"
+    """
     try:
-        if name in ("BingX", "HTX"):
-            # 渲染 JS
-            r = session.get(url, headers=HEADERS, timeout=30)
-            # 忽略 HTTPS 警告
+        if name == "HTX":
+            # 直接抓西班牙语版静态页面
+            htx_es = "https://www.huobi.br.com/es-la/trade/shrap_usdt"
+            r = requests.get(htx_es, headers=HEADERS,
+                             proxies=PROXIES, verify=False, timeout=25)
+            text = r.text.lower()  # 包含 “Innovation Zone Asset Risk Disclosure” :contentReference[oaicite:0]{index=0}
+        elif name == "Bybit":
+            # 需渲染的 Bybit
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+            r = session.get(url, headers=HEADERS, timeout=30)
             r.html.render(timeout=30, sleep=2)
             text = r.html.html.lower()
-        else:
-            # Bybit 走普通 requests+代理
+        else:  # BingX
             r = requests.get(url, headers=HEADERS,
                              proxies=PROXIES, verify=False, timeout=25)
             text = r.text.lower()
     except Exception as e:
         return name, [f"fetch_error:{e.__class__.__name__}"]
-    tags = []
 
-    # 完整短语匹配 “innovation zone”
+    tags = []
     if "innovation zone" in text:
         tags.append("Innovation Zone")
-
-    # 原 ST 逻辑：找“st”并在上下文判断
+    # ST 检测：找 “st” 并在上下文检测关键字
     for m in re.finditer(r'\bst\b', text):
         window = text[max(0, m.start() - 15) : m.end() + 15]
         if re.search(r'risk|special|treatment', window):
@@ -63,7 +68,6 @@ def detect(url: str, name: str):
     return name, tags
 
 def push_tg(msg: str):
-    """发 Telegram"""
     try:
         requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -81,9 +85,8 @@ def main(test=False):
         print("测试消息已发")
         return
 
-    results = [detect(u, n) for n, u in SITES]
-    alert = any(tags and not tags[0].startswith("fetch_error")
-                for _, tags in results)
+    results = [detect(name, url) for name, url in SITES]
+    alert = any(tags and not tags[0].startswith("fetch_error") for _, tags in results)
 
     line = " | ".join(
         f"{name}: {'❗️'+','.join(tags) if tags else '✅ No tag'}"
