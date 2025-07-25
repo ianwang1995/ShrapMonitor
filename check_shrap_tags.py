@@ -78,7 +78,14 @@ def detect_htx():
 if __name__ == "__main__":
     print(detect_htx())
 
-    # BingX/Bybit 走最轻量逻辑
+
+def detect(name: str, url: str):
+    """
+    统一检测入口：
+    - HTX: Playwright + 代理拦截
+    - 其他: requests + Oxylabs 代理 + 宽松匹配
+    返回 (name, [tags])
+    """
     try:
         resp = requests.get(
             url,
@@ -89,7 +96,7 @@ if __name__ == "__main__":
         )
         text = resp.text.lower()
     except Exception as e:
-    return name, [f"fetch_error:{type(e).__name__}"]
+        return name, [f"fetch_error:{type(e).__name__}"]
 
     tags = []
     if "innovation" in text and ("zone" in text or "risk" in text):
