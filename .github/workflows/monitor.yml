@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies (lock versions)
         run: |
-          pip install playwright undetected-chromedriver selenium selenium-wire requests requests_html webdriver-manager "blinker<1.5" lxml_html_clean
+          pip install httpx playwright undetected-chromedriver selenium selenium-wire requests requests_html webdriver-manager "blinker<1.5" lxml_html_clean
           playwright install chromium
 
       - name: Run monitor script
