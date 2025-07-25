@@ -89,7 +89,7 @@ if __name__ == "__main__":
         )
         text = resp.text.lower()
     except Exception as e:
-        return name, [f"fetch_error:{type(e).__name__}"]
+    return name, [f"fetch_error:{type(e).__name__}"]
 
     tags = []
     if "innovation" in text and ("zone" in text or "risk" in text):
