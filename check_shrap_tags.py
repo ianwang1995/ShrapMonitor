@@ -32,68 +32,51 @@ SITES = [
 ]
 
 
-def detect_htx(url: str):
-    """
-    用 Playwright 打开 HTX 并通过代理，
-    显式等待 hotWordList 请求并解析其 JSON
-    """
+import httpx
+
+def detect_htx():
+
     tags = []
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox"],
-            proxy={"server": PLAYWRIGHT_PROXY}
-        )
-        context = browser.new_context(
-            user_agent=HEADERS["User-Agent"],
-            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"}
-        )
-        page = context.new_page()
 
-        # 屏蔽静态资源，加速加载
-        page.route("**/*", lambda route, req: route.abort()
-                   if req.resource_type in ("image", "stylesheet", "font", "media")
-                   else route.continue_())
+    try:
 
-        # 先加载 DOMContentLoaded
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        url = "https://www.htx.com/-/x/hbg/v1/hbg/open/message/currency/notice/message?currency=SHRAP"
 
-        try:
-            # 等待 hotWordList XHR 完成
-            response = page.wait_for_response(
-                lambda resp: "hotWordList" in resp.url and resp.status == 200,
-                timeout=30000
-            )
-            data = response.json().get("data", [])
-            for item in data:
-                text = str(item.get("text", "")).lower()
-                if "innovation zone" in text or "创新专区" in text:
-                    tags.append("Innovation Zone")
-                    break
-        except PlaywrightTimeout:
-            # 超时静默继续
-            pass
-        except Exception:
-            pass
-        finally:
-            browser.close()
+        headers = {
+        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+        'Accept': "application/json, text/plain, */*",
+        'accept-language': "en-US",
+        'cache-control': "no-cache",
+        'pragma': "no-cache",
+        'priority': "u=1, i",
+        'referer': "https://www.htx.com/trade/shrap_usdt?type=spot",
+        'sec-ch-ua': "\"Not)A;Brand\";v=\"8\", \"Chromium\";v=\"138\", \"Microsoft Edge\";v=\"138\"",
+        'sec-ch-ua-mobile': "?0",
+        'sec-ch-ua-platform': "\"Windows\"",
+        'sec-fetch-dest': "empty",
+        'sec-fetch-mode': "cors",
+        'sec-fetch-site': "same-origin",
+        'webmark': "v10003"
+        }
 
+        client = httpx.Client(proxy="http://127.0.0.1:33333")
+
+        response = client.get(url, headers=headers)
+        body = response.json()
+        if body.get('code', -1) != 200:
+            raise Exception("Response code is not 200")
+        
+        msg = body.get('data', [{}])[0].get('messageBody', '')
+        if 'Innovation Zone' in msg:
+            tags.append('Innovation Zone')
+
+    except Exception:
+        pass
     return tags
 
 
-def detect(name: str, url: str):
-    """
-    统一检测入口：
-    - HTX: Playwright + 代理拦截
-    - 其他: requests + Oxylabs 代理 + 宽松匹配
-    返回 (name, [tags])
-    """
-    if name == "HTX":
-        try:
-            tags = detect_htx(url)
-            return name, tags
-        except Exception as e:
-            return name, [f"fetch_error:{type(e).__name__}"]
+if __name__ == "__main__":
+    print(detect_htx())
 
     # BingX/Bybit 走最轻量逻辑
     try:
