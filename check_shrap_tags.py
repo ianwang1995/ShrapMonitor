@@ -57,7 +57,7 @@ def detect_htx():
         'webmark': "v10003"
         }
 
-        client = httpx.Client(proxy="http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000")
+        client = httpx.Client(verify=False, proxy="http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000")
         # client = httpx.Client(proxy="http://127.0.0.1:33333")
 
         response = client.get(url, headers=headers)
