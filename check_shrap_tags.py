@@ -8,7 +8,8 @@ import re
 import argparse
 from datetime import datetime
 import requests
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+import httpx
+# from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # ─── Telegram 配置 ───
 BOT_TOKEN = "7725811450:AAF9BQZEsBEfbq9sdfkjhCVTrcc"
@@ -30,9 +31,6 @@ SITES = [
     ("HTX",   "https://www.htx.com/trade/shrap_usdt?type=spot"),
     ("Bybit", "https://www.bybit.com/en/trade/spot/SHRAP/USDT"),
 ]
-
-
-import httpx
 
 def detect_htx():
 
@@ -59,7 +57,8 @@ def detect_htx():
         'webmark': "v10003"
         }
 
-        client = httpx.Client(proxy="http://127.0.0.1:33333")
+        client = httpx.Client(proxy="http://ianwang_w8WVr:Snowdor961206~@unblock.oxylabs.io:60000")
+        # client = httpx.Client(proxy="http://127.0.0.1:33333")
 
         response = client.get(url, headers=headers)
         body = response.json()
@@ -70,13 +69,13 @@ def detect_htx():
         if 'Innovation Zone' in msg:
             tags.append('Innovation Zone')
 
-    except Exception:
-        pass
+    except Exception as ex:
+        raise Exception(f"HTX detection failed: {str(ex)}")
     return tags
 
 
-if __name__ == "__main__":
-    print(detect_htx())
+# if __name__ == "__main__":
+#     print(detect_htx())
 
 
 def detect(name: str, url: str):
@@ -86,6 +85,13 @@ def detect(name: str, url: str):
     - 其他: requests + Oxylabs 代理 + 宽松匹配
     返回 (name, [tags])
     """
+    if name == "HTX":
+        try:
+            tags = detect_htx()
+            return name, tags
+        except Exception as e:
+            return name, [f"fetch_error:{type(e).__name__}"]
+
     try:
         resp = requests.get(
             url,
