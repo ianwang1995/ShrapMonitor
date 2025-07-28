@@ -12,7 +12,7 @@ import httpx
 # from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # ─── Telegram 配置 ───
-BOT_TOKEN = "7725811450:AAF9BQZEsBEfbq9sdfkjhCVTrcc"
+BOT_TOKEN = "7725811450:AAF9BQZEsBEfbp9y80GlqTGBsM1qhVCTrcc"
 CHAT_ID   = "1805436662"
 
 # ─── Oxylabs Web-Unblocker 代理（仅用于 BingX/Bybit 的 requests 部分） ───
