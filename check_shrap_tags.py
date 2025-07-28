@@ -119,16 +119,18 @@ def detect(name: str, url: str):
 def push_tg(msg: str):
     """发送 Telegram 报警（不使用代理）"""
     try:
+        print("📤 Sending Telegram alert:", msg)  # 打印即将发送的消息内容
         response = requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
             data={"chat_id": CHAT_ID, "text": msg},
             timeout=10,
-            proxies={"http": None, "https": None}  # 关键点：禁用代理
+            proxies={"http": None, "https": None}
         )
-        print("Telegram push status:", response.status_code)
-        print("Telegram response:", response.text)
+        print("✅ Telegram push status:", response.status_code)
+        print("📬 Telegram response text:", response.text)
     except Exception as e:
-        print("Telegram push failed:", e)
+        print("❌ Telegram push failed:", e)
+
 
 def main(test=False):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
