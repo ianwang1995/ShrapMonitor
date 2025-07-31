@@ -105,14 +105,23 @@ def detect(name: str, url: str):
         return name, [f"fetch_error:{type(e).__name__}"]
 
     tags = []
+
+    # Innovation Zone 检测
     if "innovation" in text and ("zone" in text or "risk" in text):
         tags.append("Innovation Zone")
-    # ST 检测
-    for m in re.finditer(r'\bst\b', text):
+
+    # ST 检测：窗口关键词 + 宽松正则
+    for m in re.finditer(r'\bst\b|\bst[\s\-]?\w{0,10}', text, re.IGNORECASE):
         window = text[max(0, m.start()-15): m.end()+15]
-        if re.search(r'risk|special|treatment', window):
+        if re.search(r'risk|special|treatment', window, re.IGNORECASE):
             tags.append("ST")
             break
+
+    # 如果全文中出现明显的 ST 关键词组合，也加标签
+    if re.search(r'ST\s+(risk|treatment|stock|token|flag)', text, re.IGNORECASE):
+        if "ST" not in tags:
+            tags.append("ST")
+
     return name, tags
 
 
