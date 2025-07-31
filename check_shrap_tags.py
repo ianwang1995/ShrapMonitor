@@ -106,21 +106,15 @@ def detect(name: str, url: str):
 
     tags = []
 
-    # Innovation Zone 检测
-    if "innovation" in text and ("zone" in text or "risk" in text):
+    # Innovation Zone 检测（忽略大小写）
+    txt_lower = text.lower()
+    if "innovation" in txt_lower and ("zone" in txt_lower or "risk" in txt_lower):
         tags.append("Innovation Zone")
 
-    # ST 检测：窗口关键词 + 宽松正则
-    for m in re.finditer(r'\bst\b|\bst[\s\-]?\w{0,10}', text, re.IGNORECASE):
-        window = text[max(0, m.start()-15): m.end()+15]
-        if re.search(r'risk|special|treatment', window, re.IGNORECASE):
-            tags.append("ST")
-            break
-
-    # 如果全文中出现明显的 ST 关键词组合，也加标签
-    if re.search(r'ST\s+(risk|treatment|stock|token|flag)', text, re.IGNORECASE):
-        if "ST" not in tags:
-            tags.append("ST")
+    # ST 检测：只要出现独立的 ST，就算
+    # \b 确保是独立词，re.IGNORECASE 忽略大小写
+    if re.search(r'\bST\b', text, re.IGNORECASE):
+        tags.append("ST")
 
     return name, tags
 
