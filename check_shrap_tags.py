@@ -73,10 +73,8 @@ def detect_htx():
         raise Exception(f"HTX detection failed: {str(ex)}")
     return tags
 
-
 # if __name__ == "__main__":
 #     print(detect_htx())
-
 
 def detect(name: str, url: str):
     """
@@ -100,7 +98,9 @@ def detect(name: str, url: str):
             verify=False,
             timeout=20
         )
-        text = resp.text.lower()
+        # Debug: 输出 HTTP 状态码，确认代理及访问情况
+        print(f"[DEBUG] {name} response status: {resp.status_code}")
+        text = resp.text
     except Exception as e:
         return name, [f"fetch_error:{type(e).__name__}"]
 
@@ -111,13 +111,11 @@ def detect(name: str, url: str):
     if "innovation" in txt_lower and ("zone" in txt_lower or "risk" in txt_lower):
         tags.append("Innovation Zone")
 
-    # ST 检测：只要出现独立的 ST，就算
-    # \b 确保是独立词，re.IGNORECASE 忽略大小写
+    # ST 检测：只要出现独立的 ST，就算（忽略大小写）
     if re.search(r'\bST\b', text, re.IGNORECASE):
         tags.append("ST")
 
     return name, tags
-
 
 def push_tg(msg: str):
     """发送 Telegram 报警（不使用代理）"""
